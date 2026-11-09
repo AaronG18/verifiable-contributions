@@ -78,6 +78,21 @@ def test_untrusted_when_verifier_itself_is_modified(tmp_path, scenario, command)
     assert outcome.receipt.protected_touched is True
 
 
+def test_untrusted_when_dependabot_config_is_modified(tmp_path, scenario, command) -> None:
+    repo, commit = scenario
+    base = commit(BUGGY_MODULE, VACUOUS_TEST, message="base", policy=_policy(command))
+    commit(FIXED_MODULE, CATCHING_TEST, message="fix")
+    (repo / ".github").mkdir(exist_ok=True)
+    (repo / ".github" / "dependabot.yml").write_text("version: 2\nupdates: []\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "weaken dependabot config")
+    head = git(repo, "rev-parse", "HEAD").strip()
+
+    outcome = replay(repo, base, head, workdir=tmp_path / "work")
+    assert outcome.receipt.verdict == VERDICT_UNTRUSTED
+    assert outcome.receipt.protected_touched is True
+
+
 def test_policy_is_read_from_base_not_head(tmp_path, scenario, command) -> None:
     repo, commit = scenario
     base = commit(BUGGY_MODULE, VACUOUS_TEST, message="base", policy=_policy(command))

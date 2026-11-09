@@ -15,6 +15,8 @@ DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
     "action.yml",
     ".vrc.toml",
     ".github/workflows/receipt.yml",
+    ".github/dependabot.yml",
+    "SECURITY.md",
     "pyproject.toml",
 )
 

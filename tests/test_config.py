@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,18 @@ def test_default_policy_is_safe() -> None:
     assert config.command[0] == "python"
     assert config.timeout_seconds == 300
     assert ".vrc.toml" in config.protected_paths
+
+
+def test_security_config_files_are_protected_by_default() -> None:
+    config = Config.default()
+    assert ".github/dependabot.yml" in config.protected_paths
+    assert "SECURITY.md" in config.protected_paths
+
+
+def test_repo_policy_matches_the_default_protected_paths() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    data = tomllib.loads((repo_root / ".vrc.toml").read_text(encoding="utf-8"))
+    assert tuple(data["protected_paths"]) == Config.default().protected_paths
 
 
 def test_load_accepts_interpreter_absolute_path() -> None:

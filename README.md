@@ -93,7 +93,7 @@ The action uploads `receipt.json` as an artifact and appends the Markdown
 report to the job summary. `fail-on` is empty by default: the check reports
 rather than gates. Turn it on once the project's test suite is reliable.
 
-Pin the action to a commit SHA in production. Use `pull_request`, never
+Pin the action to a commit SHA in production (this repository pins all of its own third-party actions the same way). Use `pull_request`, never
 `pull_request_target`, so untrusted code never sees a writable token or
 secrets.
 
