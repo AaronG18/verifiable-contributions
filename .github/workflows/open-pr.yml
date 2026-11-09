@@ -1,0 +1,36 @@
+name: open-pr
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Source branch (must start with work/)
+        required: true
+      title:
+        description: Pull request title
+        required: true
+      body:
+        description: Pull request body
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SRC: ${{ inputs.branch }}
+          TITLE: ${{ inputs.title }}
+          BODY: ${{ inputs.body }}
+        run: |
+          case "$SRC" in work/*) ;; *) echo "branch must start with work/"; exit 1 ;; esac
+          gh pr create --base main --head "$SRC" --title "$TITLE" --body "$BODY"
