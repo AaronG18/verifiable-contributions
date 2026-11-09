@@ -21,9 +21,13 @@ the highest priority.
 - Verification runs with read-only repository permissions and no secrets.
 - Untrusted contributor code is never run in a workflow that holds a write token.
 - No workflow uses `pull_request_target` to check out and execute PR head code.
-- Third-party actions should be pinned to a full commit SHA in production. The
-  in-repo workflows currently use major-version tags for the MVP; see the note
-  in `docs/threat-model.md` about supply-chain risk before deploying this.
+- Every third-party action in this repository is pinned to a full commit SHA,
+  with the corresponding release tag in a trailing comment. SHA bumps are made
+  in a reviewed PR. Dependabot version updates are disabled for actions so that
+  a moving major tag cannot silently re-enter the workflows; Dependabot
+  security updates remain enabled so CVE fixes still arrive.
+- Consumers of this action should also pin `AaronG18/verifiable-contributions`
+  to a full commit SHA rather than a tag. See `docs/threat-model.md`.
 - Evidence produced by a contributor is never trusted without independent replay.
 
 ## Known limitations
