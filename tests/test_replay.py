@@ -41,6 +41,33 @@ def test_verified_when_test_fails_on_base_and_passes_on_head(tmp_path, scenario,
     assert r.to_dict()["digest"]
 
 
+def test_import_error_on_base_is_not_verified(tmp_path, scenario, command) -> None:
+    """The exact false positive this classifier exists to prevent."""
+    repo, commit = scenario
+    # The head adds a module that the test imports; on the base tree that module
+    # does not exist, so the base run fails with a collection error, not an
+    # assertion failure. A non-zero exit alone must not count as evidence.
+    (repo / "sample.py").unlink(missing_ok=True)
+    (repo / "tests").mkdir(exist_ok=True)
+    (repo / "tests" / "test_sample.py").write_text(
+        "from sample import double\n\n\ndef test_double():\n    assert double(4) == 8\n",
+        encoding="utf-8",
+    )
+    (repo / ".vrc.toml").write_text(_policy(command), encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base without the module")
+    base = git(repo, "rev-parse", "HEAD").strip()
+    (repo / "sample.py").write_text(FIXED_MODULE, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "add the module")
+    head = git(repo, "rev-parse", "HEAD").strip()
+
+    outcome = replay(repo, base, head, workdir=tmp_path / "work")
+    assert outcome.receipt.base_run.failure_kind == "environment"
+    assert outcome.receipt.verdict == VERDICT_NEEDS_RERUN
+    assert "collection or environment error" in outcome.receipt.reason
+
+
 def test_needs_evidence_when_test_is_vacuous(tmp_path, scenario, command) -> None:
     repo, commit = scenario
     base = commit(BUGGY_MODULE, VACUOUS_TEST, message="base", policy=_policy(command))

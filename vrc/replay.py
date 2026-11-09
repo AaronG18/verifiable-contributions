@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .classification import classify_failure
 from .config import CONFIG_NAME, Config, ConfigError
 from .receipt import (
     EXCERPT_LIMIT,
@@ -154,7 +155,14 @@ def _env_for_run() -> dict[str, str]:
     return env
 
 
-def _run(command: tuple[str, ...], cwd: Path, timeout: int) -> RunRecord:
+def _run(
+    command: tuple[str, ...],
+    cwd: Path,
+    timeout: int,
+    *,
+    environment_markers: tuple[str, ...],
+    assertion_markers: tuple[str, ...],
+) -> RunRecord:
     start = time.monotonic()
     env = _env_for_run()
     # The extracted tree must win over anything installed in the runner. Without
@@ -192,6 +200,14 @@ def _run(command: tuple[str, ...], cwd: Path, timeout: int) -> RunRecord:
             127,
             False,
         )
+    kind, evidence = classify_failure(
+        exit_code,
+        stdout,
+        stderr,
+        timed_out=timed_out,
+        environment_markers=environment_markers,
+        assertion_markers=assertion_markers,
+    )
     return RunRecord(
         exit_code=exit_code,
         stdout_sha256=sha256_text(stdout),
@@ -200,6 +216,8 @@ def _run(command: tuple[str, ...], cwd: Path, timeout: int) -> RunRecord:
         stderr_excerpt=stderr[-EXCERPT_LIMIT:],
         duration_seconds=time.monotonic() - start,
         timed_out=timed_out,
+        failure_kind=kind,
+        failure_evidence=evidence,
     )
 
 
@@ -241,8 +259,12 @@ def replay(
         )
 
     protected = _protected_touched(repo, base_sha, head_sha, config.protected_paths)
-    base_run = _run(config.command, base_dir, config.timeout_seconds)
-    head_run = _run(config.command, head_dir, config.timeout_seconds)
+    run_kwargs = {
+        "environment_markers": config.environment_markers,
+        "assertion_markers": config.assertion_markers,
+    }
+    base_run = _run(config.command, base_dir, config.timeout_seconds, **run_kwargs)
+    head_run = _run(config.command, head_dir, config.timeout_seconds, **run_kwargs)
     verdict, reason = derive_verdict(base_run, head_run, protected)
 
     if repository is None:
@@ -278,6 +300,8 @@ def replay(
         verdict=verdict,
         reason=reason,
         protected_touched=protected,
+        environment_markers=config.environment_markers,
+        assertion_markers=config.assertion_markers,
     )
     return ReplayOutcome(receipt=receipt, base_dir=base_dir, head_dir=head_dir)
 

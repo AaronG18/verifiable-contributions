@@ -29,6 +29,7 @@ def render_markdown(receipt: Receipt) -> str:
         f"| stderr sha256 | `{r.base_run.stderr_sha256[:16]}...` | "
         f"`{r.head_run.stderr_sha256[:16]}...` |",
         f"| Duration | {r.base_run.duration_seconds:.1f}s | {r.head_run.duration_seconds:.1f}s |",
+        f"| Failure kind | `{r.base_run.failure_kind}` | `{r.head_run.failure_kind}` |",
         "",
         f"Command: `{' '.join(r.command)}`",
         "",
@@ -41,9 +42,17 @@ def render_markdown(receipt: Receipt) -> str:
     if r.verdict == VERDICT_VERIFIED:
         lines += [
             "",
-            "This means the attached tests fail without the change and pass with it "
-            "in this CI environment. It does not prove the change is correct, only "
-            "that the claimed behaviour is exercised by a test. A human still reviews.",
+            "The base failure was classified as an assertion failure, so the tests "
+            "fail without the change and pass with it in this CI environment. This "
+            "does not prove the change is correct, only that the claimed behaviour "
+            "is exercised by a test. A human still reviews.",
+            "",
+            f"Base failure evidence: `{r.base_run.failure_evidence[:300]}`",
+        ]
+    elif r.base_run.failure_kind == "environment":
+        lines += [
+            "",
+            f"Base failure evidence: `{r.base_run.failure_evidence[:300]}`",
         ]
     if r.base_run.stderr_excerpt and r.verdict != VERDICT_VERIFIED:
         lines += [

@@ -6,6 +6,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .classification import DEFAULT_ASSERTION_MARKERS, DEFAULT_ENVIRONMENT_MARKERS
+
 CONFIG_NAME = ".vrc.toml"
 
 DEFAULT_COMMAND: tuple[str, ...] = ("python", "-m", "pytest", "-q")
@@ -31,6 +33,8 @@ class Config:
     test_paths: tuple[str, ...]
     protected_paths: tuple[str, ...]
     timeout_seconds: int
+    environment_markers: tuple[str, ...]
+    assertion_markers: tuple[str, ...]
 
     @classmethod
     def default(cls) -> Config:
@@ -39,6 +43,8 @@ class Config:
             test_paths=DEFAULT_TEST_PATHS,
             protected_paths=DEFAULT_PROTECTED_PATHS,
             timeout_seconds=300,
+            environment_markers=DEFAULT_ENVIRONMENT_MARKERS,
+            assertion_markers=DEFAULT_ASSERTION_MARKERS,
         )
 
     @classmethod
@@ -85,9 +91,21 @@ class Config:
         if not isinstance(timeout, int) or isinstance(timeout, bool) or not 10 <= timeout <= 3600:
             raise ConfigError("timeout_seconds must be an integer between 10 and 3600")
 
+        def extra_markers(key: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
+            raw_markers = data.get(key, [])
+            if not isinstance(raw_markers, list) or not all(
+                isinstance(m, str) and m.strip() for m in raw_markers
+            ):
+                raise ConfigError(f"{key} must be a list of non-empty strings")
+            # Custom markers are appended, never replacing the built-in ones, so
+            # a policy cannot switch off the environment-error detection.
+            return defaults + tuple(m.strip().lower() for m in raw_markers)
+
         return cls(
             command=tuple(command),
             test_paths=tuple(p.rstrip("/") for p in paths),
             protected_paths=tuple(protected),
             timeout_seconds=timeout,
+            environment_markers=extra_markers("environment_markers", DEFAULT_ENVIRONMENT_MARKERS),
+            assertion_markers=extra_markers("assertion_markers", DEFAULT_ASSERTION_MARKERS),
         )
