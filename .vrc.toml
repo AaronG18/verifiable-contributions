@@ -1,0 +1,8 @@
+# Configuration for verifying change proposals to this repository.
+# The CI reads this file from the BASE ref, never from the PR head, so a
+# contributor cannot weaken the check by editing it in the same PR.
+
+command = ["python", "-m", "pytest", "-q"]
+test_paths = ["tests/"]
+timeout_seconds = 300
+protected_paths = ["vrc/", "action.yml", ".vrc.toml", ".github/workflows/receipt.yml", "pyproject.toml"]

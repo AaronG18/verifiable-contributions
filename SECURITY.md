@@ -21,5 +21,16 @@ the highest priority.
 - Verification runs with read-only repository permissions and no secrets.
 - Untrusted contributor code is never run in a workflow that holds a write token.
 - No workflow uses `pull_request_target` to check out and execute PR head code.
-- All third-party actions are pinned to a full commit SHA.
+- Third-party actions should be pinned to a full commit SHA in production. The
+  in-repo workflows currently use major-version tags for the MVP; see the note
+  in `docs/threat-model.md` about supply-chain risk before deploying this.
 - Evidence produced by a contributor is never trusted without independent replay.
+
+## Known limitations
+
+Verification runs the repository's own test command, so it executes untrusted
+code by design. It uses a read-only token, no secrets, no persistent credentials
+and a timeout, but it does **not** provide a container sandbox or network
+isolation. For untrusted contributions use a disposable runner with restricted
+egress. A receipt is a structured record, not a signature; see
+`docs/threat-model.md` for the full list of what it does and does not prove.
