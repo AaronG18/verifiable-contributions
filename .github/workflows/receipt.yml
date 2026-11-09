@@ -1,0 +1,32 @@
+name: receipt
+
+# This workflow runs on the PR's own ref with a read-only token and no secrets.
+# It never uses pull_request_target, so untrusted PR code cannot reach a token
+# with write permissions. The verifier and its policy are read from the base ref.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  receipt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Produce verification receipt
+        uses: ./
+        with:
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+          setup-command: python -m pip install --disable-pip-version-check pytest
+          # Report only. Set fail-on to NEEDS_EVIDENCE,NEEDS_RERUN to gate merges.
+          fail-on: ""

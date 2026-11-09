@@ -1,2 +1,115 @@
 # verifiable-contributions
-Make AI-assisted pull requests independently verifiable for maintainers
+
+Give an open-source maintainer one thing they currently lack: a way to check,
+without reading a wall of pasted logs, that the tests attached to a pull request
+actually exercise the change.
+
+## The problem
+
+Generating a plausible pull request now costs almost nothing. Reviewing one
+still costs the same. Linux Foundation Research (20 October 2026) found that
+25% of incoming PRs are estimated to be low-quality AI output, rising to 31%
+in large projects; 53% of maintainers disagree that GenAI improved community
+trust, and only 35% of projects have a formal policy for AI-assisted work. The
+report asks projects to put the burden of testing and disclosure on
+contributors and to treat verification as core infrastructure.
+
+A PR body saying "tests pass" is a claim, not evidence. A pasted log is also a
+claim: nobody can tell whether it came from this diff, this commit, or this
+environment.
+
+## What this does
+
+On every pull request, CI controlled by the maintainer runs the attached tests
+twice:
+
+1. On the **base tree**, with only the head's test files copied over. The source
+   change is deliberately absent, so the new tests must fail.
+2. On the **head tree**, unchanged, where they must pass.
+
+It writes a structured receipt recording both runs, the exact command, the
+commit SHAs, digests of the test files and of both output streams, and a
+verdict. A reviewer reads one short Markdown summary in the job summary and can
+reproduce the run with a single command.
+
+Verdicts:
+
+| Verdict | Meaning |
+| --- | --- |
+| `VERIFIED` | Tests fail on base and pass on head. The claimed behaviour is exercised by a test. |
+| `NEEDS_EVIDENCE` | Tests also pass on base. The test does not detect the change, so it proves nothing. |
+| `NEEDS_RERUN` | Tests fail on head, or a run timed out. Broken build or environment drift. |
+| `UNTRUSTED` | The PR modifies the verifier or its policy. A human must review that first. |
+
+`VERIFIED` is deliberately narrow. It does not say the change is correct,
+secure, well designed, or worth maintaining. It says a specific behaviour is
+covered by a test that fails without the change. A human still reviews.
+
+## Install and use
+
+```shell
+pip install -e .
+vrc replay --base <base-sha> --head <head-sha> --output receipt.json --format summary
+vrc check receipt.json
+vrc explain receipt.json
+```
+
+`vrc replay` needs a local git repository containing both commits. It uses
+`git archive` to materialise two trees in a temporary directory, so your
+working tree is never touched. `vrc check` recomputes the receipt digest and
+re-derives the verdict from the recorded exit codes, which catches a receipt
+that was edited after the fact.
+
+Add a `.vrc.toml` to the **default branch** of the repository you want to
+verify:
+
+```toml
+command = ["python", "-m", "pytest", "-q"]
+test_paths = ["tests/"]
+timeout_seconds = 300
+protected_paths = ["vrc/", "action.yml", ".vrc.toml", ".github/workflows/receipt.yml"]
+```
+
+The policy is read from the **base commit only**. A contributor cannot weaken
+the command or the test paths in the same PR that is being checked; if they
+touch a protected path, the verdict is `UNTRUSTED`.
+
+### In GitHub Actions
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    persist-credentials: false
+    fetch-depth: 0
+- uses: AaronG18/verifiable-contributions@v0.1.0
+  with:
+    base: ${{ github.event.pull_request.base.sha }}
+    head: ${{ github.event.pull_request.head.sha }}
+    setup-command: python -m pip install pytest
+    fail-on: NEEDS_EVIDENCE,NEEDS_RERUN
+```
+
+The action uploads `receipt.json` as an artifact and appends the Markdown
+report to the job summary. `fail-on` is empty by default: the check reports
+rather than gates. Turn it on once the project's test suite is reliable.
+
+Pin the action to a commit SHA in production. Use `pull_request`, never
+`pull_request_target`, so untrusted code never sees a writable token or
+secrets.
+
+## What this is not
+
+Read [docs/threat-model.md](docs/threat-model.md) before relying on a receipt.
+The short version: a receipt is a structured record, not a cryptographic
+signature. Its trust comes from being produced by CI the maintainer controls.
+It cannot prove that a test asserts the right thing, that generated code is
+licensed cleanly, or that a contributor understands their own patch.
+
+## Status
+
+Early MVP. The verifier is Python-first and assumes the project's tests can be
+run with a single command from the source tree. There is no signing, no
+attestation store, and no cross-repository evidence history yet. Issues and
+critical feedback are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Licensed under Apache-2.0.
