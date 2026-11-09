@@ -1,8 +1,20 @@
 # Contributing
 
-Every change to `main` goes through a pull request and requires an approving
-review from the code owner. This applies to the owner, to bots, and to AI agents
-alike. There are no bypass actors.
+Every change to `main` goes through a pull request. Direct pushes are blocked,
+force pushes and branch deletion are blocked, and the `verify` status check must
+pass. Merges are squash-only. There are no bypass actors.
+
+The code owner's own changes (including changes made by an agent acting for the
+owner) may be approved and merged by that agent without a separate human review.
+The PR is still required, and the review and CI results are still recorded. Work
+done this way uses a `work/` branch and is opened by the `open-pr` workflow, so
+the PR author is `github-actions[bot]` and an approval can be submitted.
+
+Pull requests from external contributors are different: they require a human
+review from the code owner. An agent acting for the owner must not approve or
+merge someone else's PR. This is the project's own first line of defence against
+unreviewed machine-generated changes, and it is the same standard this tool asks
+other projects to adopt.
 
 ## Before opening a pull request
 
