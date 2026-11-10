@@ -93,7 +93,7 @@ touch a protected path, the verdict is `UNTRUSTED`.
   with:
     persist-credentials: false
     fetch-depth: 0
-- uses: AaronG18/verifiable-contributions@v0.2.0
+- uses: AaronG18/verifiable-contributions@v0.2.1
   with:
     base: ${{ github.event.pull_request.base.sha }}
     head: ${{ github.event.pull_request.head.sha }}
