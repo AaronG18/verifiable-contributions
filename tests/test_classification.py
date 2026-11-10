@@ -7,6 +7,7 @@ from vrc.classification import (
     KIND_UNKNOWN,
     classify_failure,
     is_valid_kind,
+    markers_for,
 )
 
 
@@ -67,3 +68,92 @@ def test_is_valid_kind() -> None:
         is_valid_kind(k) for k in (KIND_NONE, KIND_ASSERTION, KIND_ENVIRONMENT, KIND_UNKNOWN)
     )
     assert not is_valid_kind("asserted")
+
+
+# --- Multi-runner support: each runner's assertion output is recognised. ---
+
+
+def test_jest_assertion_failure_is_evidence() -> None:
+    out = "FAIL ./src/add.test.js\n  ✕ adds numbers (3 ms)\n  expect(received).toBe(3)\n    Expected: 3\n    Received: 2"
+    env, assert_ = markers_for(runners=("jest",))
+    kind, evidence = classify_failure(
+        1, out, "", timed_out=False, environment_markers=env, assertion_markers=assert_
+    )
+    assert kind == KIND_ASSERTION
+
+
+def test_vitest_assertion_failure_is_evidence() -> None:
+    out = "FAIL src/add.test.ts > adds numbers\n × adds numbers\n   AssertionError: expected 2 to be 3"
+    env, assert_ = markers_for(runners=("vitest",))
+    kind, _ = classify_failure(
+        1, out, "", timed_out=False, environment_markers=env, assertion_markers=assert_
+    )
+    assert kind == KIND_ASSERTION
+
+
+def test_go_test_assertion_failure_is_evidence() -> None:
+    out = "--- FAIL: TestAdd (0.00s)\n    add_test.go:12: expected 3, got 2\nFAIL\nexit status 1"
+    env, assert_ = markers_for(runners=("go-test",))
+    kind, _ = classify_failure(
+        1, out, "", timed_out=False, environment_markers=env, assertion_markers=assert_
+    )
+    assert kind == KIND_ASSERTION
+
+
+def test_mocha_assertion_failure_is_evidence() -> None:
+    out = "  1) add\n       should add numbers:\n         AssertionError: expected 2 to equal 3\n\n  1 failing"
+    env, assert_ = markers_for(runners=("mocha",))
+    kind, _ = classify_failure(
+        1, out, "", timed_out=False, environment_markers=env, assertion_markers=assert_
+    )
+    assert kind == KIND_ASSERTION
+
+
+def test_npm_assertion_failure_is_evidence() -> None:
+    out = "FAIL src/index.test.js\n  ✗ exports the handler\n  AssertionError: expected true to be false\n1 failing"
+    env, assert_ = markers_for(runners=("npm",))
+    kind, _ = classify_failure(
+        1, out, "", timed_out=False, environment_markers=env, assertion_markers=assert_
+    )
+    assert kind == KIND_ASSERTION
+
+
+def test_go_build_failure_is_environment_error() -> None:
+    out = 'package main: build failed\n# command-line-arguments\ncannot find package "example"'
+    env, assert_ = markers_for(runners=("go-test",))
+    kind, _ = classify_failure(
+        2, out, "", timed_out=False, environment_markers=env, assertion_markers=assert_
+    )
+    assert kind == KIND_ENVIRONMENT
+
+
+def test_jest_cannot_find_module_is_environment_error() -> None:
+    out = "Cannot find module 'left-pad' from 'src/add.test.js'"
+    env, assert_ = markers_for(runners=("jest",))
+    kind, _ = classify_failure(
+        1, out, "", timed_out=False, environment_markers=env, assertion_markers=assert_
+    )
+    assert kind == KIND_ENVIRONMENT
+
+
+def test_unknown_runner_is_ignored_and_still_fails_closed() -> None:
+    env, assert_ = markers_for(runners=("totally-unknown-runner",))
+    # Without a matching assertion marker the failure stays UNKNOWN.
+    kind, _ = classify_failure(
+        1,
+        "weird runner output with no known signature",
+        "",
+        timed_out=False,
+        environment_markers=env,
+        assertion_markers=assert_,
+    )
+    assert kind == KIND_UNKNOWN
+
+
+def test_markers_for_appends_without_replacing_defaults() -> None:
+    env, assert_ = markers_for(runners=("jest",))
+    # Built-in pytest markers are still present (never replaced by a preset).
+    assert "assertionerror" in assert_
+    assert "modulenotfounderror" in env
+    # And the jest preset is added on top.
+    assert any("expect(" in m for m in assert_)

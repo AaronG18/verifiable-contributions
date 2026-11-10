@@ -45,9 +45,10 @@ A non-zero exit on the base tree is not enough. A missing module, a collection
 error and a genuine assertion failure all exit with code 1, but only the last
 one shows that a test detected the change. The verifier classifies the base
 output and records the matching evidence line in the receipt, which `vrc check`
-re-classifies to catch tampering. If your test runner uses different output,
-append patterns to `assertion_markers` in the policy; unknown failures fail
-closed to `NEEDS_RERUN`.
+re-classifies to catch tampering. If your test runner uses different output, set
+`runner` in the policy (e.g. `jest`, `vitest`, `go-test`, `mocha`, `npm`) or
+append patterns to `assertion_markers`; unknown failures fail closed to
+`NEEDS_RERUN`. See [docs/runners.md](docs/runners.md) for per-runner examples.
 
 `VERIFIED` is deliberately narrow. It does not say the change is correct,
 secure, well designed, or worth maintaining. It says a specific behaviour is
@@ -92,7 +93,7 @@ touch a protected path, the verdict is `UNTRUSTED`.
   with:
     persist-credentials: false
     fetch-depth: 0
-- uses: AaronG18/verifiable-contributions@v0.1.0
+- uses: AaronG18/verifiable-contributions@v0.2.0
   with:
     base: ${{ github.event.pull_request.base.sha }}
     head: ${{ github.event.pull_request.head.sha }}
@@ -118,9 +119,11 @@ licensed cleanly, or that a contributor understands their own patch.
 
 ## Status
 
-Early MVP. The verifier is Python-first and assumes the project's tests can be
-run with a single command from the source tree. There is no signing, no
-attestation store, and no cross-repository evidence history yet. Issues and
-critical feedback are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Working MVP. The verifier assumes a project's tests run from a single command in
+the source tree; it ships built-in failure signatures for `pytest`, and supports
+`jest`, `vitest`, `go test`, `mocha` and `npm` via the `runner` policy key (see
+[docs/runners.md](docs/runners.md)). There is no signing, no attestation store,
+and no cross-repository evidence history yet. Issues and critical feedback are
+welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Licensed under Apache-2.0.
