@@ -83,3 +83,37 @@ def test_missing_file_raises() -> None:
 def test_protected_paths_are_respected() -> None:
     config = Config.load(_policy(["python"], protected_paths=["vrc/", "custom.yml"]))
     assert config.protected_paths == ("vrc/", "custom.yml")
+
+
+def test_runner_appends_recognised_markers() -> None:
+    config = Config.load(_policy(["python"], runner=["jest"]))
+    assert config.runner == ("jest",)
+    # The jest preset is present on top of the built-in defaults.
+    assert any("expect(" in m for m in config.assertion_markers)
+    assert "modulenotfounderror" in config.environment_markers
+
+
+def test_unknown_runner_is_ignored_not_rejected() -> None:
+    # An unknown runner contributes no preset but is kept and does not error.
+    config = Config.load(_policy(["python"], runner=["my-custom-runner"]))
+    assert config.runner == ("my-custom-runner",)
+    # Built-in defaults are still applied.
+    assert "assertionerror" in config.assertion_markers
+
+
+def test_runner_case_insensitive() -> None:
+    config = Config.load(_policy(["python"], runner=["Jest", "Go-Test"]))
+    assert config.runner == ("jest", "go-test")
+
+
+def test_runner_must_be_list_of_strings() -> None:
+    with pytest.raises(ConfigError, match="runner"):
+        Config.load(_policy(["python"], runner=["ok", ""]))
+
+
+def test_extra_markers_still_append_with_runner() -> None:
+    config = Config.load(
+        _policy(["python"], runner=["jest"], assertion_markers=["my-runner: boom"])
+    )
+    assert "my-runner: boom" in config.assertion_markers
+    assert any("expect(" in m for m in config.assertion_markers)

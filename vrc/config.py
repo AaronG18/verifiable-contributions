@@ -6,7 +6,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .classification import DEFAULT_ASSERTION_MARKERS, DEFAULT_ENVIRONMENT_MARKERS
+from .classification import markers_for
 
 CONFIG_NAME = ".vrc.toml"
 
@@ -33,18 +33,21 @@ class Config:
     test_paths: tuple[str, ...]
     protected_paths: tuple[str, ...]
     timeout_seconds: int
+    runner: tuple[str, ...]
     environment_markers: tuple[str, ...]
     assertion_markers: tuple[str, ...]
 
     @classmethod
     def default(cls) -> Config:
+        environment_markers, assertion_markers = markers_for()
         return cls(
             command=DEFAULT_COMMAND,
             test_paths=DEFAULT_TEST_PATHS,
             protected_paths=DEFAULT_PROTECTED_PATHS,
             timeout_seconds=300,
-            environment_markers=DEFAULT_ENVIRONMENT_MARKERS,
-            assertion_markers=DEFAULT_ASSERTION_MARKERS,
+            runner=(),
+            environment_markers=environment_markers,
+            assertion_markers=assertion_markers,
         )
 
     @classmethod
@@ -91,7 +94,17 @@ class Config:
         if not isinstance(timeout, int) or isinstance(timeout, bool) or not 10 <= timeout <= 3600:
             raise ConfigError("timeout_seconds must be an integer between 10 and 3600")
 
-        def extra_markers(key: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
+        runners_raw = data.get("runner", [])
+        if not isinstance(runners_raw, list) or not all(
+            isinstance(r, str) and r.strip() for r in runners_raw
+        ):
+            raise ConfigError("runner must be a list of non-empty strings")
+        # Unknown runners are kept but contribute no preset; the defaults plus
+        # any explicit extra markers still apply (fail-closed). Lowered so the
+        # policy file can use "pytest", "Jest", etc.
+        runners = tuple(r.strip().lower() for r in runners_raw)
+
+        def extra_markers(key: str) -> tuple[str, ...]:
             raw_markers = data.get(key, [])
             if not isinstance(raw_markers, list) or not all(
                 isinstance(m, str) and m.strip() for m in raw_markers
@@ -99,13 +112,20 @@ class Config:
                 raise ConfigError(f"{key} must be a list of non-empty strings")
             # Custom markers are appended, never replacing the built-in ones, so
             # a policy cannot switch off the environment-error detection.
-            return defaults + tuple(m.strip().lower() for m in raw_markers)
+            return tuple(m.strip().lower() for m in raw_markers)
+
+        environment_markers, assertion_markers = markers_for(
+            runners,
+            extra_environment=extra_markers("environment_markers"),
+            extra_assertion=extra_markers("assertion_markers"),
+        )
 
         return cls(
             command=tuple(command),
             test_paths=tuple(p.rstrip("/") for p in paths),
             protected_paths=tuple(protected),
             timeout_seconds=timeout,
-            environment_markers=extra_markers("environment_markers", DEFAULT_ENVIRONMENT_MARKERS),
-            assertion_markers=extra_markers("assertion_markers", DEFAULT_ASSERTION_MARKERS),
+            runner=runners,
+            environment_markers=environment_markers,
+            assertion_markers=assertion_markers,
         )

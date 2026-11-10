@@ -1,5 +1,5 @@
-name: "Verification Receipt"
-description: "Independently replay the tests attached to a pull request on both the base and head trees"
+name: "Verifiable Contributions"
+description: "Independently replay the tests attached to a pull request on both the base and head trees, then emit a tamper-evident verification receipt"
 author: "AaronG18"
 
 branding:

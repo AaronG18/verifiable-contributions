@@ -66,6 +66,128 @@ def is_valid_kind(value: str) -> bool:
     return value in _KINDS
 
 
+# Extra markers for common test runners, selected via the policy's `runner`
+# list. They are *appended* to the defaults (never replacing them), so a runner
+# preset cannot switch off the environment-error detection. Unknown runners are
+# ignored and fall back to the defaults plus any `assertion_markers` /
+# `environment_markers` the policy appends directly.
+RUNNER_ASSERTION_MARKERS: dict[str, tuple[str, ...]] = {
+    "jest": (
+        "✕",
+        "✗",
+        "×",
+        "●",
+        "tests: ",
+        "test suites:",
+        "expect(",
+        "expected",
+        "received",
+        "assertionerror",
+        "to equal",
+        "to be",
+        "to match",
+    ),
+    "vitest": (
+        "✓",
+        "✗",
+        "×",
+        "❯",
+        "tests ",
+        "test suites ",
+        "expect(",
+        "expected",
+        "received",
+        "assertionerror",
+        "to equal",
+        "to be",
+    ),
+    "go-test": (
+        "--- fail:",
+        "fail:",
+        "--- fail",
+        "panic:",
+        "error trace:",
+        "error:",
+        "expected:",
+        "got:",
+    ),
+    "mocha": (
+        "passing",
+        "failing",
+        "✓",
+        "✗",
+        "assertionerror",
+        "expected",
+        "actual",
+    ),
+    "npm": (
+        "failing",
+        "failed",
+        "✗",
+        "assertionerror",
+        "expected",
+        "not equal",
+    ),
+}
+
+RUNNER_ENVIRONMENT_MARKERS: dict[str, tuple[str, ...]] = {
+    "jest": (
+        "cannot find module",
+        "no tests found",
+        "syntaxerror",
+        "cannot use import statement",
+        "transform failed",
+    ),
+    "vitest": (
+        "cannot find module",
+        "failed to resolve import",
+        "no test files found",
+        "syntaxerror",
+        "failed to load url",
+    ),
+    "go-test": (
+        "build failed",
+        "cannot find package",
+        "no required module provides package",
+        "cannot load",
+        "command-line-arguments",
+        "no go files",
+    ),
+    "mocha": (
+        "cannot find module",
+        "no files found",
+        "syntaxerror",
+    ),
+    "npm": (
+        "npm error code",
+        "missing script: test",
+        "eresolve",
+        "npm error",
+        "command not found",
+    ),
+}
+
+
+def markers_for(
+    runners: tuple[str, ...] = (),
+    extra_environment: tuple[str, ...] = (),
+    extra_assertion: tuple[str, ...] = (),
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Resolve the final (environment, assertion) marker tuples.
+
+    Starts from the built-in defaults, appends each known runner's preset, then
+    appends any explicit extra markers. Unknown runners contribute nothing.
+    """
+    environment = list(DEFAULT_ENVIRONMENT_MARKERS)
+    assertion = list(DEFAULT_ASSERTION_MARKERS)
+    for runner in runners:
+        environment += list(RUNNER_ENVIRONMENT_MARKERS.get(runner, ()))
+        assertion += list(RUNNER_ASSERTION_MARKERS.get(runner, ()))
+    environment += list(extra_environment)
+    assertion += list(extra_assertion)
+    return tuple(environment), tuple(assertion)
+
+
 def classify_failure(
     exit_code: int,
     stdout: str,
