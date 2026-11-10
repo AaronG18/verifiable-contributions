@@ -18,8 +18,17 @@ from vrc.receipt import (
 
 @pytest.fixture
 def receipt_data() -> dict:
-    base = RunRecord(1, "a" * 64, "b" * 64, "assert failed", "", 0.4)
-    head = RunRecord(0, "c" * 64, "d" * 64, "1 passed", "", 0.5)
+    base = RunRecord(
+        1,
+        "a" * 64,
+        "b" * 64,
+        "assert failed",
+        "",
+        0.4,
+        failure_kind="assertion",
+        failure_evidence="FAILED test_sample.py",
+    )
+    head = RunRecord(0, "c" * 64, "d" * 64, "1 passed", "", 0.5, failure_kind="none")
     verdict, reason = derive_verdict(base, head, False)
     receipt = Receipt(
         repository="owner/repo",
@@ -85,6 +94,68 @@ def test_unsupported_schema_is_rejected(receipt_data: dict) -> None:
     assert not ok
 
 
+def test_cannot_forge_verified_by_relabelling_an_import_error(receipt_data: dict) -> None:
+    data = copy.deepcopy(receipt_data)
+    # Real observation: the base tree could not even import the test module.
+    # An attacker relabels it as an assertion failure and recomputes the digest.
+    data["base_run"]["failure_kind"] = "assertion"
+    data["base_run"]["failure_evidence"] = "e   modulenotfounderror: no module named 'sample'"
+    data["verdict"] = "VERIFIED"
+    from vrc.receipt import Receipt, derive_verdict
+
+    r = Receipt.from_dict(data)
+    data["reason"] = derive_verdict(r.base_run, r.head_run, r.protected_touched)[1]
+    payload = {k: v for k, v in data.items() if k != "digest"}
+    data["digest"] = sha256_text(canonical(payload))
+    ok, problems = check_receipt(data)
+    assert not ok
+    assert any("recomputes as" in p for p in problems)
+
+
+def test_cannot_forge_verified_by_swapping_in_fake_evidence(receipt_data: dict) -> None:
+    data = copy.deepcopy(receipt_data)
+    data["base_run"]["failure_kind"] = "assertion"
+    data["base_run"]["failure_evidence"] = "FAILED test_sample.py - assert 1 == 2"
+    data["verdict"] = "VERIFIED"
+    from vrc.receipt import Receipt, derive_verdict
+
+    r = Receipt.from_dict(data)
+    data["reason"] = derive_verdict(r.base_run, r.head_run, r.protected_touched)[1]
+    payload = {k: v for k, v in data.items() if k != "digest"}
+    data["digest"] = sha256_text(canonical(payload))
+    # With matching evidence and a recomputed digest this is internally
+    # consistent. A receipt is a record, not a signature; see threat-model.md.
+    # This test documents that explicit boundary rather than pretending
+    # otherwise.
+    ok, problems = check_receipt(data)
+    assert ok, problems
+
+
+def test_verified_requires_assertion_kind_and_evidence(receipt_data: dict) -> None:
+    data = copy.deepcopy(receipt_data)
+    data["base_run"]["failure_kind"] = "environment"
+    data["base_run"]["failure_evidence"] = ""
+    ok, problems = check_receipt(data)
+    assert not ok
+    assert any("verdict" in p or "digest" in p for p in problems)
+
+
+def test_invalid_failure_kind_is_rejected(receipt_data: dict) -> None:
+    data = copy.deepcopy(receipt_data)
+    data["base_run"]["failure_kind"] = "totally-made-up"
+    ok, problems = check_receipt(data)
+    assert not ok
+    assert any("failure_kind" in p for p in problems)
+
+
+def test_successful_run_cannot_claim_assertion_failure(receipt_data: dict) -> None:
+    data = copy.deepcopy(receipt_data)
+    data["head_run"]["failure_kind"] = "assertion"
+    ok, problems = check_receipt(data)
+    assert not ok
+    assert any("must be 'none'" in p for p in problems)
+
+
 def test_malformed_sha_is_detected(receipt_data: dict) -> None:
     data = copy.deepcopy(receipt_data)
     data["base_sha"] = "abc"
@@ -110,11 +181,27 @@ def test_roundtrip_json(tmp_path: Path, receipt_data: dict) -> None:
 
 
 def test_verdict_derivation_covers_all_outcomes() -> None:
-    fail = RunRecord(1, "a" * 64, "b" * 64, "", "", 0.1)
-    ok = RunRecord(0, "c" * 64, "d" * 64, "", "", 0.1)
-    timeout = RunRecord(124, "c" * 64, "d" * 64, "", "", 0.1, timed_out=True)
-    assert derive_verdict(fail, ok, False)[0] == "VERIFIED"
+    def failed(kind: str) -> RunRecord:
+        return RunRecord(
+            1, "a" * 64, "b" * 64, "", "", 0.1, failure_kind=kind, failure_evidence="marker: line"
+        )
+
+    ok = RunRecord(0, "c" * 64, "d" * 64, "", "", 0.1, failure_kind="none")
+    timeout = RunRecord(
+        124,
+        "c" * 64,
+        "d" * 64,
+        "",
+        "",
+        0.1,
+        timed_out=True,
+        failure_kind="environment",
+        failure_evidence="timeout",
+    )
+    assert derive_verdict(failed("assertion"), ok, False)[0] == "VERIFIED"
+    assert derive_verdict(failed("environment"), ok, False)[0] == "NEEDS_RERUN"
+    assert derive_verdict(failed("unknown"), ok, False)[0] == "NEEDS_RERUN"
     assert derive_verdict(ok, ok, False)[0] == "NEEDS_EVIDENCE"
-    assert derive_verdict(fail, fail, False)[0] == "NEEDS_RERUN"
+    assert derive_verdict(failed("assertion"), failed("assertion"), False)[0] == "NEEDS_RERUN"
     assert derive_verdict(timeout, ok, False)[0] == "NEEDS_RERUN"
-    assert derive_verdict(fail, ok, True)[0] == "UNTRUSTED"
+    assert derive_verdict(failed("assertion"), ok, True)[0] == "UNTRUSTED"

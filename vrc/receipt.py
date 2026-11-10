@@ -13,7 +13,14 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = 1
+from .classification import (
+    DEFAULT_ASSERTION_MARKERS,
+    DEFAULT_ENVIRONMENT_MARKERS,
+    classify_failure,
+    is_valid_kind,
+)
+
+SCHEMA_VERSION = 2
 EXCERPT_LIMIT = 2000
 
 VERDICT_VERIFIED = "VERIFIED"
@@ -39,6 +46,8 @@ class RunRecord:
     stderr_excerpt: str
     duration_seconds: float
     timed_out: bool = False
+    failure_kind: str = "unknown"
+    failure_evidence: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +58,8 @@ class RunRecord:
             "stderr_excerpt": self.stderr_excerpt,
             "duration_seconds": round(self.duration_seconds, 3),
             "timed_out": self.timed_out,
+            "failure_kind": self.failure_kind,
+            "failure_evidence": self.failure_evidence,
         }
 
     @classmethod
@@ -61,6 +72,8 @@ class RunRecord:
             stderr_excerpt=str(data.get("stderr_excerpt", "")),
             duration_seconds=float(data.get("duration_seconds", 0.0)),
             timed_out=bool(data.get("timed_out", False)),
+            failure_kind=str(data.get("failure_kind", "unknown")),
+            failure_evidence=str(data.get("failure_evidence", "")),
         )
 
 
@@ -80,11 +93,15 @@ class Receipt:
     verdict: str
     reason: str
     protected_touched: bool = False
+    environment_markers: tuple[str, ...] = DEFAULT_ENVIRONMENT_MARKERS
+    assertion_markers: tuple[str, ...] = DEFAULT_ASSERTION_MARKERS
     digest: str = field(default="")
 
     def payload(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
+            "environment_markers": list(self.environment_markers),
+            "assertion_markers": list(self.assertion_markers),
             "repository": self.repository,
             "base_sha": self.base_sha,
             "head_sha": self.head_sha,
@@ -128,6 +145,8 @@ class Receipt:
             verdict=str(data["verdict"]),
             reason=str(data["reason"]),
             protected_touched=bool(data.get("protected_touched", False)),
+            environment_markers=tuple(data.get("environment_markers", DEFAULT_ENVIRONMENT_MARKERS)),
+            assertion_markers=tuple(data.get("assertion_markers", DEFAULT_ASSERTION_MARKERS)),
             digest=str(data.get("digest", "")),
         )
 
@@ -161,10 +180,24 @@ def derive_verdict(base: RunRecord, head: RunRecord, protected_touched: bool) ->
             "The new tests pass without the proposed change, so they do not "
             "demonstrate the claimed behaviour. Add a test that fails on the base ref.",
         )
+    if base.failure_kind == "environment":
+        return (
+            VERDICT_NEEDS_RERUN,
+            "The base run failed before any assertion could execute (an import, "
+            "collection or environment error). A broken test run is not evidence "
+            f"for the change. {base.failure_evidence}",
+        )
+    if base.failure_kind != "assertion":
+        return (
+            VERDICT_NEEDS_RERUN,
+            "The base run failed but the failure could not be attributed to a test "
+            "assertion. Only a recognised assertion failure counts as evidence. "
+            "Extend assertion_markers in the policy if your runner uses different output.",
+        )
     return (
         VERDICT_VERIFIED,
-        "The attached tests fail on the base ref and pass on the proposed head "
-        "in this environment.",
+        "The attached tests fail with a recognised assertion on the base ref and "
+        "pass on the proposed head in this environment.",
     )
 
 
@@ -197,6 +230,30 @@ def check_receipt(data: dict[str, Any]) -> tuple[bool, list[str]]:
             value = getattr(run, f"{stream}_sha256")
             if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
                 problems.append(f"{label}.{stream}_sha256 is not a sha256 hex digest")
+        if not is_valid_kind(run.failure_kind):
+            problems.append(f"{label}.failure_kind {run.failure_kind!r} is not a valid kind")
+        if run.exit_code == 0 and run.failure_kind != "none":
+            problems.append(f"{label}.failure_kind must be 'none' for a successful run")
+        if run.exit_code != 0 and run.failure_kind == "none":
+            problems.append(f"{label}.failure_kind cannot be 'none' for a failed run")
+        recomputed, _ = classify_failure(
+            run.exit_code,
+            run.failure_evidence,
+            "",
+            timed_out=run.timed_out,
+            environment_markers=receipt.environment_markers,
+            assertion_markers=receipt.assertion_markers,
+        )
+        if recomputed != run.failure_kind:
+            problems.append(
+                f"{label}.failure_kind {run.failure_kind!r} is not supported by its "
+                f"recorded evidence (recomputes as {recomputed!r})"
+            )
+
+    if receipt.verdict == VERDICT_VERIFIED and receipt.base_run.failure_kind != "assertion":
+        problems.append("VERIFIED requires a base assertion failure")
+    if receipt.verdict == VERDICT_VERIFIED and not receipt.base_run.failure_evidence:
+        problems.append("VERIFIED requires recorded evidence of the assertion failure")
 
     for name, digest in receipt.test_files_sha256.items():
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):

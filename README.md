@@ -36,10 +36,18 @@ Verdicts:
 
 | Verdict | Meaning |
 | --- | --- |
-| `VERIFIED` | Tests fail on base and pass on head. The claimed behaviour is exercised by a test. |
+| `VERIFIED` | The base run failed with a **recognised assertion** and the head run passed. |
 | `NEEDS_EVIDENCE` | Tests also pass on base. The test does not detect the change, so it proves nothing. |
-| `NEEDS_RERUN` | Tests fail on head, or a run timed out. Broken build or environment drift. |
+| `NEEDS_RERUN` | Head tests fail, a run timed out, or the base failed for a non-assertion reason (import/collection error, or unrecognised output). |
 | `UNTRUSTED` | The PR modifies the verifier or its policy. A human must review that first. |
+
+A non-zero exit on the base tree is not enough. A missing module, a collection
+error and a genuine assertion failure all exit with code 1, but only the last
+one shows that a test detected the change. The verifier classifies the base
+output and records the matching evidence line in the receipt, which `vrc check`
+re-classifies to catch tampering. If your test runner uses different output,
+append patterns to `assertion_markers` in the policy; unknown failures fail
+closed to `NEEDS_RERUN`.
 
 `VERIFIED` is deliberately narrow. It does not say the change is correct,
 secure, well designed, or worth maintaining. It says a specific behaviour is
@@ -67,7 +75,10 @@ verify:
 command = ["python", "-m", "pytest", "-q"]
 test_paths = ["tests/"]
 timeout_seconds = 300
-protected_paths = ["vrc/", "action.yml", ".vrc.toml", ".github/workflows/receipt.yml"]
+protected_paths = ["vrc/", "action.yml", ".vrc.toml", ".github/workflows/receipt.yml", ".github/dependabot.yml", "SECURITY.md", "pyproject.toml"]
+# Optional: append markers for a test runner whose failure output is not
+# recognised. Built-in markers can never be removed by this list.
+# assertion_markers = ["my-runner: test failed"]
 ```
 
 The policy is read from the **base commit only**. A contributor cannot weaken
@@ -77,7 +88,7 @@ touch a protected path, the verdict is `UNTRUSTED`.
 ### In GitHub Actions
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
   with:
     persist-credentials: false
     fetch-depth: 0

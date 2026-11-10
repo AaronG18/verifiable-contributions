@@ -2,6 +2,10 @@ name: "Verification Receipt"
 description: "Independently replay the tests attached to a pull request on both the base and head trees"
 author: "AaronG18"
 
+branding:
+  icon: "shield"
+  color: "purple"
+
 inputs:
   base:
     description: "Base commit SHA (before the change)"
