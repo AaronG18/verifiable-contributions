@@ -32,7 +32,31 @@ from .receipt import (
     sha256_text,
 )
 
-SAFE_ENV_DENY = ("SECRET", "TOKEN", "PASSWORD", "CREDENTIAL", "API_KEY", "PRIVATE_KEY")
+# Substring match against the variable NAME. Anything that looks like it could
+# carry a credential must not reach the untrusted test process. Keep this list
+# in sync with the contract test in tests/test_release_contract.py.
+SAFE_ENV_DENY: tuple[str, ...] = (
+    "SECRET",
+    "TOKEN",
+    "PASSWORD",
+    "CREDENTIAL",
+    "API_KEY",
+    "ACCESS_KEY",
+    "PRIVATE_KEY",
+    "PRIVATE",
+    "AUTH_CONFIG",
+    "WEBHOOK",
+    "PEM",
+    "SESSION_KEY",
+    "COOKIE",
+    "SIGNING_KEY",
+    "KUBECONFIG",
+)
+
+# Exact names that do not contain any of the substrings above. Do NOT add
+# short substrings like "PAT" to SAFE_ENV_DENY: it would also strip PATH,
+# COMPAT and PATTERN and break every test command.
+SAFE_ENV_DENY_EXACT: frozenset[str] = frozenset({"GH_PAT", "GITHUB_PAT", "NPM_CONFIG_USERCONFIG"})
 
 
 class ReplayError(RuntimeError):
@@ -167,7 +191,8 @@ def _env_for_run() -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
-        if not any(deny in key.upper() for deny in SAFE_ENV_DENY)
+        if key.upper() not in SAFE_ENV_DENY_EXACT
+        and not any(deny in key.upper() for deny in SAFE_ENV_DENY)
     }
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["VRC_VERIFICATION_RUN"] = "1"
