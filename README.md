@@ -84,10 +84,18 @@ change" case the tool is built to surface.
 
 ```shell
 pip install -e .
+vrc validate .vrc.toml --repo .          # check the policy BEFORE opening a PR
 vrc replay --base <base-sha> --head <head-sha> --output receipt.json --format summary
 vrc check receipt.json
 vrc explain receipt.json
 ```
+
+`vrc validate` is a local preflight: it loads the policy, rejects unknown keys
+and non-allowlisted executables, and checks that `working_directory` and every
+`test_paths` entry exist. It runs no tests and needs no CI. This matters more
+than it sounds: a workflow coming from a fork does not run until a maintainer
+approves it, so without this check a broken policy is discovered only after
+someone else has spent time on the PR.
 
 `vrc replay` needs a local git repository containing both commits. It uses
 `git archive` to materialise two trees in a temporary directory, so your
@@ -108,11 +116,35 @@ protected_paths = ["vrc/", "action.yml", ".vrc.toml", ".github/workflows/", ".gi
 # assertion_markers = ["my-runner: test failed"]
 ```
 
+Unknown keys are a **hard error**. `setup-command` is not a policy key: it is
+an input of the action's `with:` block in the workflow. A typo or a misplaced
+key used to be silently ignored, which made a control look active when it was
+not. `vrc validate` reports the valid key names.
+
 `test_paths` must point at **test files only**: everything under it is copied
 from the head tree onto the base tree. Listing `src/` or `.` would copy the
 source change too and defeat the check. When tests live beside source files use
 a glob such as `["**/*.test.ts"]` or `["**/*_test.go"]`. See
 [docs/runners.md](docs/runners.md).
+
+### Monorepos
+
+The command runs at the repository root by default. In a monorepo where the
+package and its tests live under a subpath, set `working_directory` and keep
+`test_paths` relative to the **repository root**:
+
+```toml
+command = ["python", "-m", "pytest", "tests/test_interruption.py", "-q"]
+working_directory = "libs/langgraph"
+test_paths = ["libs/langgraph/tests/test_interruption.py"]
+timeout_seconds = 600
+```
+
+`working_directory` must be a safe relative path (no `..`, `.`, absolute
+paths, backslashes or empty segments) and must exist in both extracted trees;
+a missing directory is a configuration error, not a `NEEDS_RERUN`. Both the
+repository root and the subpackage are placed on `PYTHONPATH`, so the extracted
+tree wins over any editable install in the runner.
 
 The policy is read from the **base commit only**. A contributor cannot weaken
 the command or the test paths in the same PR that is being checked; if they
@@ -125,7 +157,7 @@ touch a protected path, the verdict is `UNTRUSTED`.
   with:
     persist-credentials: false
     fetch-depth: 0
-- uses: AaronG18/verifiable-contributions@v0.3.1
+- uses: AaronG18/verifiable-contributions@v0.4.0
   with:
     base: ${{ github.event.pull_request.base.sha }}
     head: ${{ github.event.pull_request.head.sha }}
@@ -141,21 +173,44 @@ Pin the action to a commit SHA in production (this repository pins all of its ow
 `pull_request_target`, so untrusted code never sees a writable token or
 secrets.
 
+### Adopting it: land the wiring in its own PR
+
+The first PR that adds `.vrc.toml` and `verify.yml` **always** reports
+`UNTRUSTED`. Those files are protected paths, so that PR cannot vouch for
+itself — by design, not by accident. Review that wiring as a human, merge it on
+its own, and only then will later PRs produce a usable receipt.
+
+Do not bundle the wiring with a bug fix. The resulting receipt is `UNTRUSTED`
+and says nothing about the fix, while the maintainer has to approve a workflow
+from a fork, read a new CI file and carry a third-party action in their CI
+forever. On a project with a healthy CI matrix that is a net cost, not help.
+
+If you are contributing to a repository you do not control, you usually should
+not ask them to adopt anything at all. Run `vrc replay --format markdown`
+locally and paste the result into your PR description as **self-check
+evidence**. The report explicitly labels it as a self-check, not a CI
+attestation, and a reviewer can reproduce it from the recorded command and
+commits. Nothing needs their approval.
+
 ## What this is not
 
 Read [docs/threat-model.md](docs/threat-model.md) before relying on a receipt.
 The short version: a receipt is a structured record, not a cryptographic
-signature. Its trust comes from being produced by CI the maintainer controls.
-It cannot prove that a test asserts the right thing, that generated code is
-licensed cleanly, or that a contributor understands their own patch.
+signature. Its trust comes from being produced by CI the maintainer
+controls — a receipt generated locally with `vrc replay` is a self-check and
+carries no such trust. `VERIFIED` does not prove that a test asserts the right
+thing, that generated code is licensed cleanly, or that a contributor
+understands their own patch. It also says nothing about whether the change is
+semantically correct; human review still decides that.
 
 ## Status
 
-Working MVP. The verifier assumes a project's tests run from a single command in
-the source tree; it ships built-in failure signatures for `pytest`, and supports
-`jest`, `vitest`, `go test`, `mocha` and `npm` via the `runner` policy key (see
-[docs/runners.md](docs/runners.md)). There is no signing, no attestation store,
-and no cross-repository evidence history yet. Issues and critical feedback are
-welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Working MVP. The verifier runs one test command from the repository root or a
+declared `working_directory` (monorepos); `vrc validate` checks a policy
+locally before a PR is opened. It ships built-in failure signatures for
+`pytest`, and supports `jest`, `vitest`, `go test`, `mocha` and `npm` via the
+`runner` policy key (see [docs/runners.md](docs/runners.md)). There is no
+signing, no attestation store, and no cross-repository evidence history yet.
+Issues and critical feedback are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Licensed under Apache-2.0.
