@@ -104,7 +104,20 @@ def _safe_relative(path: str) -> Path:
     return candidate
 
 
+def _is_glob(path: Path) -> bool:
+    return any(char in path.as_posix() for char in "*?[")
+
+
 def _iter_files(root: Path, relative: Path) -> list[Path]:
+    if _is_glob(relative):
+        # `Path.glob` treats "**" as "this directory and below", so a pattern
+        # like "**/*_test.go" selects test files anywhere without ever pulling
+        # in the source files sitting next to them.
+        return sorted(
+            p.relative_to(root)
+            for p in root.glob(relative.as_posix())
+            if p.is_file() and not p.is_symlink()
+        )
     target = root / relative
     if target.is_file():
         return [relative]
@@ -120,12 +133,18 @@ def _overlay_test_paths(base: Path, head: Path, test_paths: tuple[str, ...]) -> 
     digests: dict[str, str] = {}
     for raw in test_paths:
         relative = _safe_relative(raw)
-        base_target = base / relative
-        if base_target.is_dir():
-            shutil.rmtree(base_target)
-        elif base_target.is_file() or base_target.is_symlink():
-            base_target.unlink()
-        for rel in _iter_files(head, relative):
+        head_files = _iter_files(head, relative)
+        if _is_glob(relative):
+            # Remove only the files this pattern matches, never a whole tree.
+            for rel in _iter_files(base, relative):
+                (base / rel).unlink()
+        else:
+            base_target = base / relative
+            if base_target.is_dir():
+                shutil.rmtree(base_target)
+            elif base_target.is_file() or base_target.is_symlink():
+                base_target.unlink()
+        for rel in head_files:
             source = head / rel
             dest = base / rel
             dest.parent.mkdir(parents=True, exist_ok=True)

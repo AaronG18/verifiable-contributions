@@ -19,13 +19,26 @@ not yet `VERIFIED`.
 | `runner` | Example command | Assertion signature used |
 | --- | --- | --- |
 | `pytest` (default) | `python -m pytest -q` | `AssertionError`, `assert `, `1 failed`, `= failures =` |
-| `jest` | `npx jest` | `✕`, `expect(`, `Tests: … failed`, `Expected/Received` |
-| `vitest` | `npx vitest run` | `×`, `expect(`, `AssertionError`, `Tests …` |
-| `go-test` | `go test ./...` | `--- FAIL:`, `panic:`, `Expected:/Got:` |
-| `mocha` | `npx mocha` | `failing`, `AssertionError`, `expected … to` |
-| `npm` | `npm test` | failing test output plus `AssertionError` |
+| `jest` | `npx jest --ci` | `✕`, `✗`, `expect(`, `AssertionError` |
+| `vitest` | `npx vitest run` | `×`, `✗`, `expect(`, `AssertionError` |
+| `go-test` | `go test ./...` | `--- FAIL:`, `error trace:`, `not equal` |
+| `mocha` | `npx mocha` | `1 failing`, `AssertionError` |
+| `npm` | `npm test` | `failing`, `AssertionError` |
+
+Assertion markers only contain **failure** signatures. A passing run that exits
+non-zero for an unrelated reason is never read as evidence. Lines explicitly
+reporting `0 failed` / `0 failing` are also excluded.
 
 Unknown runner names are ignored (the defaults still apply).
+
+### Keep `test_paths` test-only
+
+Everything under `test_paths` is copied from the head tree onto the base tree.
+If you list a source directory (`src/`, `.`), the **source change is copied too**
+and the check becomes meaningless. Use a dedicated test directory or a glob
+that selects test files explicitly. Root-level and common source directory names
+are rejected by `Config.load`; globs such as `**/*.test.ts` or `**/*_test.go`
+are the way to cover tests that live beside source files.
 
 ## Examples
 
@@ -41,7 +54,7 @@ timeout_seconds = 300
 
 ```toml
 command = ["npx", "jest", "--ci"]
-test_paths = ["__tests__/", "src/"]
+test_paths = ["__tests__/", "**/*.test.js"]
 runner = ["jest"]
 timeout_seconds = 300
 ```
@@ -63,7 +76,7 @@ timeout_seconds = 300
 
 ```toml
 command = ["npx", "vitest", "run"]
-test_paths = ["src/"]
+test_paths = ["**/*.test.ts"]
 runner = ["vitest"]
 timeout_seconds = 300
 ```
@@ -72,7 +85,7 @@ timeout_seconds = 300
 
 ```toml
 command = ["go", "test", "./..."]
-test_paths = ["."]
+test_paths = ["**/*_test.go"]
 runner = ["go-test"]
 timeout_seconds = 600
 ```
@@ -92,10 +105,16 @@ If your runner isn't listed, append its signature directly; the built-ins stay:
 
 ```toml
 command = ["my-runner", "test"]
-runner = []   # no preset
+command_allowlist = ["my-runner"]   # required for a non-standard executable
+runner = []                         # no preset
 assertion_markers = ["my-runner: FAILED", "my-runner: expectation violated"]
 environment_markers = ["my-runner: could not start", "my-runner: missing config"]
+test_paths = ["tests/"]
 ```
+
+`command_allowlist` extends the built-in allowlist (`python`, `pytest`, `npm`,
+`npx`, `node`, `pnpm`, `yarn`, `bun`, `go`, ...). It lives in the base policy, so
+a contributor cannot grant themselves a new executable in the PR under review.
 
 ## A note on `setup-command`
 

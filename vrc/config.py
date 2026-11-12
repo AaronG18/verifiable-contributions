@@ -12,11 +12,43 @@ CONFIG_NAME = ".vrc.toml"
 
 DEFAULT_COMMAND: tuple[str, ...] = ("python", "-m", "pytest", "-q")
 DEFAULT_TEST_PATHS: tuple[str, ...] = ("tests", "test")
+
+# Executables accepted in the test command. The policy is read from the base
+# ref, so a contributor cannot add an executable in the PR being verified.
+# Projects with their own launcher can extend this via `command_allowlist`.
+ALLOWLISTED_EXECUTABLES: frozenset[str] = frozenset(
+    {
+        "python",
+        "python3",
+        "pytest",
+        "uv",
+        "tox",
+        "npm",
+        "npx",
+        "node",
+        "pnpm",
+        "yarn",
+        "bun",
+        "go",
+    }
+)
+
+# A test path rooted at one of these would copy the source change onto the base
+# tree, defeating the entire check. Glob patterns (e.g. "**/*_test.go") are
+# allowed because they select test files explicitly.
+UNSAFE_TEST_PATH_ROOTS: frozenset[str] = frozenset(
+    {".", "", "/", "src", "lib", "app", "pkg", "internal", "packages"}
+)
+
+# Protect the whole workflows directory, not just receipt.yml: verify.yml and
+# open-pr.yml also control what runs in CI. `tests/` is deliberately NOT here —
+# this repository dogfoods the action, and protecting tests would make every
+# one of its own PRs UNTRUSTED, destroying that signal. See the threat model.
 DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
     "vrc/",
     "action.yml",
     ".vrc.toml",
-    ".github/workflows/receipt.yml",
+    ".github/workflows/",
     ".github/dependabot.yml",
     "SECURITY.md",
     "pyproject.toml",
@@ -74,9 +106,18 @@ class Config:
         for suffix in (".exe", ".cmd", ".bat"):
             if executable.endswith(suffix):
                 executable = executable[: -len(suffix)]
-        allowlisted = {"python", "python3", "pytest", "uv", "tox", "npm", "pnpm", "go"}
+        allowlisted = set(ALLOWLISTED_EXECUTABLES)
+        custom = data.get("command_allowlist", [])
+        if not isinstance(custom, list) or not all(
+            isinstance(item, str) and item.strip() for item in custom
+        ):
+            raise ConfigError("command_allowlist must be a list of non-empty strings")
+        allowlisted.update(item.strip().lower() for item in custom)
         if executable not in allowlisted and not executable.startswith("python3."):
-            raise ConfigError(f"command executable {command[0]!r} is not allowlisted")
+            raise ConfigError(
+                f"command executable {command[0]!r} is not allowlisted; "
+                "add it to command_allowlist in the base policy if this is intentional"
+            )
 
         paths = data.get("test_paths", list(DEFAULT_TEST_PATHS))
         if (
@@ -85,6 +126,15 @@ class Config:
             or not all(isinstance(p, str) and p and ".." not in p for p in paths)
         ):
             raise ConfigError("test_paths must be a non-empty list of safe relative paths")
+        for path in paths:
+            first = path.strip("/").split("/")[0].lower()
+            if any(char in path for char in "*?["):
+                continue  # explicit glob, e.g. "**/*_test.go"
+            if first in UNSAFE_TEST_PATH_ROOTS:
+                raise ConfigError(
+                    f"test_paths entry {path!r} would copy the source change onto the "
+                    "base tree; use a test-only directory or a glob such as '**/*_test.go'"
+                )
 
         protected = data.get("protected_paths", list(DEFAULT_PROTECTED_PATHS))
         if not isinstance(protected, list) or not all(isinstance(p, str) for p in protected):
