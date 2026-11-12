@@ -58,6 +58,31 @@ def test_repo_policy_matches_defaults() -> None:
 def test_action_validates_its_own_receipt() -> None:
     action = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
     assert "vrc check receipt.json" in action, "the action must self-validate the receipt"
+    # The check must gate the summary/artifact, not be a best-effort log line.
+    check_at = action.index("vrc check receipt.json")
+    explain_at = action.index("vrc explain receipt.json")
+    upload_at = action.index("- name: Upload receipt")
+    assert check_at < explain_at < upload_at
+    assert 'echo "::error::receipt failed' in action
+
+
+def test_workflow_yaml_is_parseable() -> None:
+    """Every workflow must be valid YAML and keep the required `verify` job."""
+    import yaml
+
+    workflows = list((REPO_ROOT / ".github/workflows").glob("*.yml"))
+    assert workflows
+    for path in workflows:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert isinstance(data, dict), f"{path.name} is not a YAML mapping"
+        assert "jobs" in data, f"{path.name} has no jobs"
+    verify = yaml.safe_load(
+        (REPO_ROOT / ".github/workflows/verify.yml").read_text(encoding="utf-8")
+    )
+    assert "verify" in verify["jobs"], "the ruleset requires a check literally named verify"
+    assert "matrix" not in verify["jobs"]["verify"], "matrix would rename the required check"
+    action = yaml.safe_load((REPO_ROOT / "action.yml").read_text(encoding="utf-8"))
+    assert len(action["description"]) < 125, "Marketplace rejects descriptions >= 125 chars"
 
 
 def test_action_does_not_use_pull_request_target_as_a_trigger() -> None:
