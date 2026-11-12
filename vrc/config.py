@@ -6,7 +6,10 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .classification import markers_for
+from .classification import RUNNER_ASSERTION_MARKERS, markers_for
+
+# `pytest` needs no preset: its signatures are the built-in defaults.
+KNOWN_RUNNERS: frozenset[str] = frozenset({*RUNNER_ASSERTION_MARKERS, "pytest"})
 
 CONFIG_NAME = ".vrc.toml"
 
@@ -149,10 +152,15 @@ class Config:
             isinstance(r, str) and r.strip() for r in runners_raw
         ):
             raise ConfigError("runner must be a list of non-empty strings")
-        # Unknown runners are kept but contribute no preset; the defaults plus
-        # any explicit extra markers still apply (fail-closed). Lowered so the
-        # policy file can use "pytest", "Jest", etc.
+        # A typo like "go_test" used to be silently ignored: the check still
+        # failed closed, but the user could not tell why. Reject it explicitly.
         runners = tuple(r.strip().lower() for r in runners_raw)
+        unknown = [r for r in runners if r not in KNOWN_RUNNERS]
+        if unknown:
+            raise ConfigError(
+                f"unknown runner(s) {unknown!r}; valid values are "
+                f"{sorted(KNOWN_RUNNERS)}. Use assertion_markers for a custom runner."
+            )
 
         def extra_markers(key: str) -> tuple[str, ...]:
             raw_markers = data.get(key, [])

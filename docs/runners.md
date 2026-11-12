@@ -29,7 +29,10 @@ Assertion markers only contain **failure** signatures. A passing run that exits
 non-zero for an unrelated reason is never read as evidence. Lines explicitly
 reporting `0 failed` / `0 failing` are also excluded.
 
-Unknown runner names are ignored (the defaults still apply).
+An unknown `runner` name is a configuration error: the policy fails to load
+and lists the valid values. This is deliberate — silently ignoring a typo like
+`go_test` would make it look as though a preset were active when it is not.
+Use `assertion_markers` / `environment_markers` for a runner with no preset.
 
 ### Keep `test_paths` test-only
 
@@ -64,7 +67,7 @@ timeout_seconds = 300
   with:
     persist-credentials: false
     fetch-depth: 0
-- uses: AaronG18/verifiable-contributions@v0.2.1
+- uses: AaronG18/verifiable-contributions@v0.3.0
   with:
     base: ${{ github.event.pull_request.base.sha }}
     head: ${{ github.event.pull_request.head.sha }}
