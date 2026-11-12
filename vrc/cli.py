@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import ConfigError
+from .config import Config, ConfigError
 from .receipt import Receipt, check_receipt
 from .replay import ReplayError, replay
 from .report import render_markdown
@@ -93,6 +93,52 @@ def _cmd_explain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_validate(args: argparse.Namespace) -> int:
+    """Check a policy locally, without CI, PRs or a maintainer's approval.
+
+    A workflow from a fork does not run until a maintainer approves it, so a
+    broken policy used to be discovered only after someone else had spent time
+    on it. `vrc validate` catches that before the PR is opened.
+    """
+    policy = Path(args.policy)
+    try:
+        config = Config.load(policy)
+    except ConfigError as exc:
+        print(f"INVALID policy: {exc}", file=sys.stderr)
+        return 2
+
+    repo = Path(args.repo).resolve()
+    problems: list[str] = []
+    if config.working_directory and not (repo / config.working_directory).is_dir():
+        problems.append(
+            f"working_directory {config.working_directory!r} does not exist under {repo}"
+        )
+    for raw in config.test_paths:
+        target = repo / raw
+        if any(char in raw for char in "*?["):
+            if not any(repo.glob(raw)):
+                problems.append(f"test path {raw!r} matches no files under {repo}")
+        elif not target.exists():
+            problems.append(f"test path {raw!r} does not exist under {repo}")
+
+    if problems:
+        for problem in problems:
+            print(f"INVALID policy: {problem}", file=sys.stderr)
+        return 1
+
+    print(f"OK: {policy} is a valid, usable policy for {repo}")
+    print(f"  command: {' '.join(config.command)}")
+    print(f"  working directory: {config.working_directory or '(repository root)'}")
+    print(f"  test paths: {', '.join(config.test_paths)}")
+    print(f"  runners: {', '.join(config.runner) or '(built-in defaults)'}")
+    print(f"  timeout: {config.timeout_seconds}s")
+    print(
+        "  note: a PR that adds .vrc.toml or the verify workflow will be UNTRUSTED; "
+        "land the wiring in its own PR first."
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vrc",
@@ -125,6 +171,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_explain = sub.add_parser("explain", help="render a receipt as Markdown")
     p_explain.add_argument("receipt")
     p_explain.set_defaults(func=_cmd_explain)
+
+    p_validate = sub.add_parser(
+        "validate", help="check a policy locally before opening a pull request"
+    )
+    p_validate.add_argument("policy", nargs="?", default=".vrc.toml", help="path to .vrc.toml")
+    p_validate.add_argument(
+        "--repo", default=".", help="repository root used to check working_directory and test_paths"
+    )
+    p_validate.set_defaults(func=_cmd_validate)
     return parser
 
 
