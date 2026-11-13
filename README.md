@@ -157,7 +157,7 @@ touch a protected path, the verdict is `UNTRUSTED`.
   with:
     persist-credentials: false
     fetch-depth: 0
-- uses: AaronG18/verifiable-contributions@v0.4.0
+- uses: AaronG18/verifiable-contributions@v0.5.0
   with:
     base: ${{ github.event.pull_request.base.sha }}
     head: ${{ github.event.pull_request.head.sha }}
@@ -172,6 +172,58 @@ rather than gates. Turn it on once the project's test suite is reliable.
 Pin the action to a commit SHA in production (this repository pins all of its own third-party actions the same way). Use `pull_request`, never
 `pull_request_target`, so untrusted code never sees a writable token or
 secrets.
+
+### Auditing the test suite: `vrc audit`
+
+`vrc replay` gives one whole-tree verdict. That verdict has a blind spot: if a
+PR changes five independent lines and four of them are covered by tests, the
+base run still fails and the receipt says `VERIFIED` — the fifth, completely
+unobserved change is hidden.
+
+`vrc audit` closes that gap. It splits the diff into independent hunks, reverts
+**one hunk at a time** on the head tree (keeping every other change), and re-runs
+the same test command:
+
+```shell
+vrc audit --base <base-sha> --head <head-sha> --output audit.json --format markdown
+vrc audit-check audit.json
+```
+
+| Status | Meaning |
+| --- | --- |
+| `PINNED` | Reverting this change point made a recognised assertion fail. At least one test observes it. |
+| `UNPINNED` | The whole suite still passed with this change point removed. No test in this suite distinguishes it. |
+| `INCONCLUSIVE` | The reverted run failed for a non-assertion reason (import error, timeout, unrecognised output). No claim is made. |
+
+The baseline head run must genuinely pass **and actually run tests**: a suite
+that exits 0 while collecting zero tests is rejected as unsound rather than
+reported as a green baseline. The report records how many tests passed, the
+exact base/head text of each hunk, exit codes, output digests, and a
+`--point N` command that reproduces any single claim. `vrc audit-check`
+recomputes the digest and re-derives every status from the raw observations.
+
+**What is and is not proven.** The measurements are reproducible facts:
+"with this one hunk reverted, under this command and environment, the suite
+exited 0". What the code *should* do is a specification, and the specification
+is not in the diff. No tool can decide the correct expected value of a missing
+assertion — that is undecidable in general (Rice's theorem). The report therefore
+separates **PROVEN** facts from **SUGGESTIONS**: for an unpinned point it gives
+the exact location, the old and new text, and a verification procedure (add a
+test that distinguishes those two values, then re-run `--point N` and require
+the status to flip to `PINNED`). The acceptance check is deterministic; the
+choice of assertion remains a human decision.
+
+`PINNED` also does not mean the assertion is *correct* — a test can pin the
+wrong expected value. This tool audits the sensitivity of a test suite to a
+diff; a human still judges correctness, design and security.
+
+**Cost, stated plainly.** An audit runs the full test suite once for the
+baseline plus once per change point: N points means N+1 complete runs. On a
+suite that takes two minutes, three points cost roughly eight minutes. This is
+inherent to mutation testing, not an inefficiency we can optimise away. Use
+`--max-points` (default 20) to bound it, or `--point N` to reproduce just one
+claim. Points beyond the limit are reported as unaudited and the verdict
+becomes `INCOMPLETE` — never a passing claim.
 
 ### Adopting it: land the wiring in its own PR
 
@@ -207,7 +259,8 @@ semantically correct; human review still decides that.
 
 Working MVP. The verifier runs one test command from the repository root or a
 declared `working_directory` (monorepos); `vrc validate` checks a policy
-locally before a PR is opened. It ships built-in failure signatures for
+locally before a PR is opened, and `vrc audit` reports per-change-point test
+sensitivity. It ships built-in failure signatures for
 `pytest`, and supports `jest`, `vitest`, `go test`, `mocha` and `npm` via the
 `runner` policy key (see [docs/runners.md](docs/runners.md)). There is no
 signing, no attestation store, and no cross-repository evidence history yet.

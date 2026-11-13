@@ -84,6 +84,11 @@ def render_markdown(receipt: Receipt) -> str:
             "does not prove the change is correct, only that the claimed behaviour "
             "is exercised by a test. A human still reviews.",
             "",
+            "**This is a whole-tree verdict.** If the PR changes several independent "
+            "lines, one failing test is enough to produce VERIFIED even when other "
+            "changes have no test at all. Run `vrc audit --base <base> --head <head>` "
+            "to see which individual change points the tests actually observe.",
+            "",
             f"Base failure evidence: `{_sanitize(r.base_run.failure_evidence[:300])}`",
         ]
     elif r.base_run.failure_kind == "environment":
