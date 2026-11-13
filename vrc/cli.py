@@ -10,6 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .audit import (
+    AuditError,
+    audit,
+    check_audit,
+    render_audit_markdown,
+)
 from .config import Config, ConfigError
 from .receipt import Receipt, check_receipt
 from .replay import ReplayError, replay
@@ -139,6 +145,64 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_audit(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    with tempfile.TemporaryDirectory(prefix="vrc-audit-") as tmp:
+        report = audit(
+            repo,
+            args.base,
+            args.head,
+            workdir=Path(tmp),
+            max_points=args.max_points,
+            repository=args.repository,
+            only_point=args.point,
+        )
+        text = report.to_json()
+        if args.output:
+            output = Path(args.output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(text, encoding="utf-8")
+        if args.format == "markdown":
+            sys.stdout.write(render_audit_markdown(report))
+        elif args.format == "summary":
+            print(
+                json.dumps(
+                    {
+                        "verdict": report.verdict,
+                        "points": len(report.points),
+                        "unaudited_points": report.unaudited_points,
+                        "pinned": sum(1 for p in report.points if p.status == "PINNED"),
+                        "unpinned": sum(1 for p in report.points if p.status == "UNPINNED"),
+                        "inconclusive": sum(1 for p in report.points if p.status == "INCONCLUSIVE"),
+                        "tests_passed": report.tests_passed,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            sys.stdout.write(text)
+    print(f"vrc audit: {report.verdict}", file=sys.stderr)
+    for verdict in args.fail_on.split(","):
+        if verdict.strip() and verdict.strip() == report.verdict:
+            return 1
+    return 0
+
+
+def _cmd_audit_check(args: argparse.Namespace) -> int:
+    try:
+        data = _load_receipt(Path(args.report))
+    except ValueError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return 2
+    ok, problems = check_audit(data)
+    if ok:
+        print(f"OK: audit report is internally consistent (verdict={data.get('verdict')})")
+        return 0
+    for problem in problems:
+        print(f"INVALID: {problem}", file=sys.stderr)
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vrc",
@@ -180,6 +244,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo", default=".", help="repository root used to check working_directory and test_paths"
     )
     p_validate.set_defaults(func=_cmd_validate)
+
+    p_audit = sub.add_parser("audit", help="audit which individual change points the tests observe")
+    p_audit.add_argument("--repo", default=".", help="path to the git repository")
+    p_audit.add_argument("--base", required=True, help="base ref (before the change)")
+    p_audit.add_argument("--head", required=True, help="head ref (with the change)")
+    p_audit.add_argument("--repository", default=None, help="repository identifier")
+    p_audit.add_argument("--output", default=None, help="write the audit report JSON here")
+    p_audit.add_argument("--format", choices=("json", "summary", "markdown"), default="json")
+    p_audit.add_argument(
+        "--point",
+        type=int,
+        default=None,
+        help="audit only this change point (1-based), to reproduce one claim",
+    )
+    p_audit.add_argument(
+        "--max-points",
+        type=int,
+        default=20,
+        help="maximum number of change points to audit (default 20)",
+    )
+    p_audit.add_argument(
+        "--fail-on",
+        default="",
+        help="comma-separated audit verdicts that produce a non-zero exit code",
+    )
+    p_audit.set_defaults(func=_cmd_audit)
+
+    p_audit_check = sub.add_parser("audit-check", help="validate an audit report's integrity")
+    p_audit_check.add_argument("report")
+    p_audit_check.set_defaults(func=_cmd_audit_check)
     return parser
 
 
@@ -188,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except (ReplayError, ConfigError) as exc:
+    except (ReplayError, ConfigError, AuditError) as exc:
         print(f"vrc: error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

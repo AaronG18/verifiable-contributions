@@ -68,6 +68,26 @@ action on its own PRs; protecting the test suite would make every one of them
 `UNTRUSTED` and destroy that signal. The verifier code itself lives in `vrc/`
 and remains protected.
 
+## Audit scope and its limits
+
+`vrc audit` is a mutation experiment, not a specification checker. A `PINNED`
+point means some test's outcome changed when that hunk was reverted; it does
+not mean the assertion checks the intended behaviour. An `UNPINNED` point means
+no test in the recorded suite, under the recorded command and environment,
+distinguishes the two values; it does not mean the code is wrong or unused.
+Deciding what assertion to add requires the change's specification, which is
+not present in the diff — no sound procedure can derive it from code alone.
+
+The audit executes the project's own test command once per change point, so it
+multiplies CI cost (bounded by `--max-points`); points beyond the limit are
+explicitly marked unaudited and the verdict is `INCOMPLETE`, never a passing
+claim. Test paths and protected paths are excluded from change points and the
+exclusions are recorded in the report. A baseline that fails, or that exits 0
+without running any tests, aborts the audit: a mutation result over a red or
+empty suite is meaningless. `vrc audit-check` makes the report tamper-evident by
+recomputing its digest and re-deriving each status from the recorded exit code
+and failure classification.
+
 ## Isolation boundary
 
 The verifier runs the repository's own test command. That is arbitrary code
